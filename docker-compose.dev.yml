@@ -1,0 +1,48 @@
+# Mode développement : le code est lu directement depuis tes dossiers et
+# rechargé à chaque enregistrement, sans reconstruire les images.
+#
+#   Démarrer :               docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#   Revenir au mode normal : docker compose up -d
+#
+# Après une modification de requirements.txt : relancer la commande de démarrage avec --build.
+# Après une modification de package.json : docker compose restart frontend.
+
+services:
+
+  backend:
+    volumes:
+      # Le dossier du backend remplace la copie faite dans l'image
+      - ../Django/sunugestion-backend:/app
+    # entrypoint.sh attend PostgreSQL, applique les migrations, puis lance cette
+    # commande à la place de gunicorn ; runserver redémarre à chaque modification
+    entrypoint: ["sh", "./entrypoint.sh"]
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+    environment:
+      # .env.docker impose DEBUG=False ; en développement, runserver sert les
+      # fichiers statiques et affiche le détail des erreurs
+      DEBUG: "True"
+
+  frontend:
+    # ng serve à la place de nginx : recompilation et rechargement de la page
+    # à chaque enregistrement
+    build: !reset null
+    image: node:22-alpine
+    working_dir: /app
+    command: >
+      sh -c "npm install --legacy-peer-deps --no-audit --no-fund
+      && npx ng serve --host 0.0.0.0 --port 4200 --proxy-config /proxy.docker.json"
+    volumes:
+      - ../Angular/sunugestion:/app
+      # Propres au conteneur : ni masqués ni écrasés par ceux de ta machine, et
+      # aucun fichier appartenant à root dans ton dossier Angular
+      - frontend_node_modules:/app/node_modules
+      - frontend_angular_cache:/app/.angular
+      # Proxy vers le conteneur backend (proxy.conf.json vise 127.0.0.1:8000)
+      - ./proxy.docker.json:/proxy.docker.json:ro
+    ports: !override
+      # Même adresse qu'en mode normal : http://localhost:8080
+      - "127.0.0.1:8080:4200"
+
+volumes:
+  frontend_node_modules:
+  frontend_angular_cache:

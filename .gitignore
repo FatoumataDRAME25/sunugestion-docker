@@ -1,0 +1,4 @@
+# Secrets (mot de passe de la base, jeton ngrok)
+.env
+# Copies de bases et de fichiers de configuration : données réelles
+sauvegardes/

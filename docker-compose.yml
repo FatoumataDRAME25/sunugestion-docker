@@ -1,0 +1,83 @@
+services:
+
+  postgres:
+    image: postgres:17
+    container_name: sunugestion-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sunugestion
+      POSTGRES_USER: sunugestion
+      # Mot de passe rangé dans .env (à côté de ce fichier, jamais publié)
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?à définir dans le fichier .env de ce dossier}
+    ports:
+      # 127.0.0.1 : accessible depuis cette machine uniquement, pas depuis le Wi-Fi
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ../Django/sunugestion-backend
+    container_name: sunugestion-backend
+    restart: unless-stopped
+    # .env (réglages communs) puis .env.docker (réglages propres à Docker, prioritaires)
+    env_file:
+      - ../Django/sunugestion-backend/.env
+      - ../Django/sunugestion-backend/.env.docker
+    extra_hosts:
+      # Permet de joindre n8n, publié sur le port 5678 de la machine
+      - "host.docker.internal:host-gateway"
+    ports:
+      # 8001 : accès direct pour le débogage (le 8000 sert au Django de développement)
+      - "127.0.0.1:8001:8000"
+    volumes:
+      # Modèles PaddleOCR, téléchargés une seule fois
+      - paddle_models:/root/.paddleocr
+      # Logos envoyés : conservés quand le conteneur est recréé
+      - media_data:/app/media
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ocr/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
+
+  frontend:
+    build:
+      context: ../Angular/sunugestion
+    container_name: sunugestion-frontend
+    restart: unless-stopped
+    ports:
+      # Porte d'entrée de l'application : http://localhost:8080
+      - "127.0.0.1:8080:80"
+    volumes:
+      # nginx sert les logos directement depuis le volume du backend
+      - media_data:/srv/media:ro
+    depends_on:
+      - backend
+
+  # Adresse publique fixe pour les liens d'activation et PayDunya, tant que
+  # l'application n'est pas déployée. Démarré seulement avec le profil :
+  #   docker compose --profile ngrok up -d
+  # Vise le nginx du mode normal : avec le mode développement, le tunnel ne
+  # répond pas (DEBUG=True n'est jamais exposé sur internet).
+  ngrok:
+    image: ngrok/ngrok:3.39.11-alpine
+    container_name: sunugestion-ngrok
+    # Relancé seulement en cas de plantage : après un redémarrage de
+    # l'ordinateur, l'application ne redevient pas publique d'elle-même
+    restart: on-failure
+    profiles: ["ngrok"]
+    command: ["http", "--url=https://reviving-gurgle-pauper.ngrok-free.dev", "frontend:80"]
+    environment:
+      # Jeton rangé dans .env (à côté de ce fichier, jamais publié)
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?à définir dans le fichier .env de ce dossier}
+    depends_on:
+      - frontend
+
+volumes:
+  postgres_data:
+  paddle_models:
+  media_data:
